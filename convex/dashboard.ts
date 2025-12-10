@@ -55,7 +55,8 @@ export const getDashboardData = query({
       .withIndex('by_userId', (q) => q.eq('userId', currentUserId))
       .first();
 
-    if (currentProfile?.role !== 'admin') {
+    // Check for valid admin roles
+    if (currentProfile?.role !== 'super_admin' && currentProfile?.role !== 'lingap_admin') {
       return null;
     }
 
@@ -138,6 +139,67 @@ export const getDashboardData = query({
         lastUpdated: new Date(now).toISOString() as string & { __brand: 'IsoDateString' },
       },
       activity,
+    };
+  },
+});
+
+/**
+ * Get role-based dashboard data for the main app view
+ */
+export const getAppDashboardData = query({
+  args: {},
+  handler: async (ctx) => {
+    const authUser = await authComponent.getAuthUser(ctx);
+    if (!authUser) return null;
+
+    const userId = assertUserId(authUser, 'User ID not found');
+    const profile = await ctx.db
+      .query('userProfiles')
+      .withIndex('by_userId', (q) => q.eq('userId', userId))
+      .first();
+
+    if (!profile) return null;
+
+    const role = profile.role;
+    const pharmacyId = profile.pharmacyId;
+
+    if (role === 'super_admin' || role === 'lingap_admin') {
+      // Super/Lingap Admin Stats
+      const pharmacies = await ctx.db.query('pharmacies').collect();
+      const users = await ctx.db.query('userProfiles').collect();
+
+      return {
+        role,
+        stats: {
+          totalPharmacies: pharmacies.length,
+          totalUsers: users.length,
+        },
+      };
+    }
+
+    if (role === 'pharmacy_admin' || role === 'pharmacy_user') {
+      if (!pharmacyId) return { role, stats: null };
+
+      const medicines = await ctx.db
+        .query('medicines')
+        .withIndex('by_pharmacyId', (q) => q.eq('pharmacyId', pharmacyId))
+        .collect();
+
+      const lowStock = medicines.filter((m) => m.stock < 10).length;
+
+      return {
+        role,
+        stats: {
+          totalMedicines: medicines.length,
+          lowStock,
+        },
+      };
+    }
+
+    // Default for lingap_user
+    return {
+      role,
+      stats: null,
     };
   },
 });

@@ -54,6 +54,8 @@ async function resolveRole(
 // Export just the resolveRole function for manual capability checking
 export { resolveRole };
 
+import type { ObjectType, PropertyValidators } from 'convex/values';
+
 /**
  * Guarded wrapper for Convex functions
  * Automatically enforces capability-based access control
@@ -62,16 +64,13 @@ export const guarded = {
   /**
    * Create a guarded query that enforces capability-based access control
    */
-  // biome-ignore lint/suspicious/noExplicitAny: Convex validator schemas require any for generic typing
-  query: <Args extends Record<string, any>, Result>(
+  query: <Args extends PropertyValidators, Result>(
     cap: Capability,
     args: Args,
-    // biome-ignore lint/suspicious/noExplicitAny: Convex runtime args are dynamically typed
-    handler: (ctx: QueryCtx, args: any, role: string) => Promise<Result>,
+    handler: (ctx: QueryCtx, args: ObjectType<Args>, role: string) => Promise<Result>,
   ) => {
     return query({
       args,
-      // biome-ignore lint/suspicious/noExplicitAny: Convex runtime args are dynamically typed
       handler: async (ctx: QueryCtx, args: any) => {
         const role = await resolveRole(ctx, cap);
         return handler(ctx, args, role);
@@ -82,16 +81,13 @@ export const guarded = {
   /**
    * Create a guarded mutation that enforces capability-based access control
    */
-  // biome-ignore lint/suspicious/noExplicitAny: Convex validator schemas require any for generic typing
-  mutation: <Args extends Record<string, any>, Result>(
+  mutation: <Args extends PropertyValidators, Result>(
     cap: Capability,
     args: Args,
-    // biome-ignore lint/suspicious/noExplicitAny: Convex runtime args are dynamically typed
-    handler: (ctx: MutationCtx, args: any, role: string) => Promise<Result>,
+    handler: (ctx: MutationCtx, args: ObjectType<Args>, role: string) => Promise<Result>,
   ) => {
     return mutation({
       args,
-      // biome-ignore lint/suspicious/noExplicitAny: Convex runtime args are dynamically typed
       handler: async (ctx: MutationCtx, args: any) => {
         const role = await resolveRole(ctx, cap);
         return handler(ctx, args, role);
@@ -102,16 +98,13 @@ export const guarded = {
   /**
    * Create a guarded action that enforces capability-based access control
    */
-  // biome-ignore lint/suspicious/noExplicitAny: Convex validator schemas require any for generic typing
-  action: <Args extends Record<string, any>, Result>(
+  action: <Args extends PropertyValidators, Result>(
     cap: Capability,
     args: Args,
-    // biome-ignore lint/suspicious/noExplicitAny: Convex runtime args are dynamically typed
-    handler: (ctx: ActionCtx, args: any, role: string) => Promise<Result>,
+    handler: (ctx: ActionCtx, args: ObjectType<Args>, role: string) => Promise<Result>,
   ) => {
     return action({
       args,
-      // biome-ignore lint/suspicious/noExplicitAny: Convex runtime args are dynamically typed
       handler: async (ctx: ActionCtx, args: any) => {
         const role = await resolveRole(ctx, cap);
         return handler(ctx, args, role);

@@ -21,6 +21,24 @@ import { usePhoneFormatter } from '~/hooks/use-phone-formatter';
 import { cn } from '~/lib/utils';
 import { USER_ROLES } from '../../auth/types';
 
+// Helper to get user-friendly role labels
+function getRoleDisplayName(role: string): string {
+  switch (role) {
+    case USER_ROLES.SUPER_ADMIN:
+      return 'Super Admin';
+    case USER_ROLES.LINGAP_ADMIN:
+      return 'Lingap Admin';
+    case USER_ROLES.LINGAP_USER:
+      return 'Lingap User';
+    case USER_ROLES.PHARMACY_ADMIN:
+      return 'Pharmacy Admin';
+    case USER_ROLES.PHARMACY_USER:
+      return 'Pharmacy User';
+    default:
+      return role;
+  }
+}
+
 // Form validation schema
 const profileSchema = z.object({
   name: z.string().min(1, 'Name is required').max(255, 'Name is too long'),
@@ -238,11 +256,7 @@ export function ProfilePage() {
         <div className="grid grid-cols-2 gap-4">
           <Field orientation="vertical">
             <FieldLabel>Role</FieldLabel>
-            <Input
-              value={profile.role === USER_ROLES.ADMIN ? 'Administrator' : 'User'}
-              disabled
-              className="bg-muted capitalize"
-            />
+            <Input value={getRoleDisplayName(profile.role)} disabled className="bg-muted" />
           </Field>
           <Field orientation="vertical">
             <FieldLabel>Created At</FieldLabel>

@@ -1,6 +1,8 @@
-import { useNavigate } from '@tanstack/react-router';
+import { api } from '@convex/_generated/api';
+import { useLocation, useNavigate } from '@tanstack/react-router';
 import type { ColumnDef } from '@tanstack/react-table';
-import { Shield } from 'lucide-react';
+import { useQuery } from 'convex/react';
+import { Building2, Shield } from 'lucide-react';
 import { useCallback, useMemo } from 'react';
 import {
   createSortableHeader,
@@ -10,7 +12,7 @@ import {
   formatTableDate,
 } from '~/components/data-table';
 import { Badge } from '~/components/ui/badge';
-import { DEFAULT_ROLE, USER_ROLES } from '../../auth/types';
+import { USER_ROLES } from '../../auth/types';
 import type { User as AdminUser } from '../types';
 
 type UserRow = AdminUser;
@@ -31,12 +33,43 @@ interface UserTableProps {
     secondarySortBy: 'name' | 'email' | 'role' | 'emailVerified' | 'createdAt';
     secondarySortOrder: 'asc' | 'desc';
     search: string;
-    role: 'all' | 'admin' | 'user';
+    role: 'all' | (typeof USER_ROLES)[keyof typeof USER_ROLES];
   };
   isLoading: boolean;
   isFetching?: boolean;
   onEditUser: (user: UserRow) => void;
   onDeleteUser: (userId: string) => void;
+}
+
+// Helper to get user-friendly role labels
+function getRoleLabel(role: string): string {
+  switch (role) {
+    case USER_ROLES.SUPER_ADMIN:
+      return 'Super Admin';
+    case USER_ROLES.LINGAP_ADMIN:
+      return 'Lingap Admin';
+    case USER_ROLES.LINGAP_USER:
+      return 'Lingap User';
+    case USER_ROLES.PHARMACY_ADMIN:
+      return 'Pharmacy Admin';
+    case USER_ROLES.PHARMACY_USER:
+      return 'Pharmacy User';
+    default:
+      return role;
+  }
+}
+
+// Helper to determine badge variant based on role
+function getRoleBadgeVariant(role: string): 'default' | 'destructive' | 'secondary' | 'outline' {
+  switch (role) {
+    case USER_ROLES.SUPER_ADMIN:
+      return 'destructive';
+    case USER_ROLES.LINGAP_ADMIN:
+    case USER_ROLES.PHARMACY_ADMIN:
+      return 'default';
+    default:
+      return 'secondary';
+  }
 }
 
 export function UserTable({
@@ -49,6 +82,15 @@ export function UserTable({
   onDeleteUser,
 }: UserTableProps) {
   const navigate = useNavigate();
+  const location = useLocation();
+  const currentRoute = location.pathname;
+
+  // Fetch pharmacies to map pharmacyId to name
+  const pharmacies = useQuery(api.pharmacies.list, {});
+  const pharmacyMap = useMemo(() => {
+    if (!pharmacies) return new Map();
+    return new Map(pharmacies.map((p) => [p._id, p.name]));
+  }, [pharmacies]);
 
   // Sorting and pagination handlers
   const handleSorting = useCallback(
@@ -56,7 +98,7 @@ export function UserTable({
       const newSortOrder =
         searchParams.sortBy === columnId && searchParams.sortOrder === 'asc' ? 'desc' : 'asc';
       navigate({
-        to: '/app/admin/users',
+        to: currentRoute,
         search: {
           ...searchParams,
           sortBy: columnId as 'name' | 'email' | 'role' | 'emailVerified' | 'createdAt',
@@ -65,26 +107,26 @@ export function UserTable({
         },
       });
     },
-    [searchParams, navigate],
+    [searchParams, navigate, currentRoute],
   );
 
   const handlePageChange = useCallback(
     (newPage: number) => {
       navigate({
-        to: '/app/admin/users',
+        to: currentRoute,
         search: {
           ...searchParams,
           page: newPage,
         },
       });
     },
-    [searchParams, navigate],
+    [searchParams, navigate, currentRoute],
   );
 
   const handlePageSizeChange = useCallback(
     (newPageSize: number) => {
       navigate({
-        to: '/app/admin/users',
+        to: currentRoute,
         search: {
           ...searchParams,
           pageSize: newPageSize,
@@ -92,7 +134,7 @@ export function UserTable({
         },
       });
     },
-    [searchParams, navigate],
+    [searchParams, navigate, currentRoute],
   );
 
   // Define table columns
@@ -118,15 +160,36 @@ export function UserTable({
         accessorKey: 'role',
         header: createSortableHeader('Role', 'role', searchParams, handleSorting),
         cell: ({ row }) => {
-          const role = row.original.role ?? DEFAULT_ROLE;
-          const isAdmin = role === USER_ROLES.ADMIN;
-          const roleLabel = `${role.slice(0, 1).toUpperCase()}${role.slice(1)}`;
+          const role = row.original.role;
+          const roleLabel = getRoleLabel(role);
+          const variant = getRoleBadgeVariant(role);
+          const isAdmin =
+            role === USER_ROLES.SUPER_ADMIN ||
+            role === USER_ROLES.LINGAP_ADMIN ||
+            role === USER_ROLES.PHARMACY_ADMIN;
 
           return (
-            <Badge variant={isAdmin ? 'destructive' : 'secondary'}>
+            <Badge variant={variant}>
               {isAdmin && <Shield className="h-3 w-3 mr-1" />}
               {roleLabel}
             </Badge>
+          );
+        },
+      },
+      {
+        accessorKey: 'pharmacyId',
+        header: () => <div>Pharmacy</div>,
+        cell: ({ row }) => {
+          const pharmacyId = row.original.pharmacyId;
+          if (!pharmacyId) {
+            return <span className="text-sm text-muted-foreground">—</span>;
+          }
+          const pharmacyName = pharmacyMap.get(pharmacyId) || 'Unknown';
+          return (
+            <div className="flex items-center gap-2">
+              <Building2 className="h-3 w-3 text-muted-foreground" />
+              <span className="text-sm text-foreground">{pharmacyName}</span>
+            </div>
           );
         },
       },
@@ -161,7 +224,7 @@ export function UserTable({
         ),
       },
     ],
-    [handleSorting, onDeleteUser, onEditUser, searchParams],
+    [handleSorting, onDeleteUser, onEditUser, pharmacyMap, searchParams],
   );
 
   return (

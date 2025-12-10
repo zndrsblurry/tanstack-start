@@ -1,12 +1,11 @@
 import { ConvexBetterAuthProvider } from '@convex-dev/better-auth/react';
 import { createContext, type ReactNode, useContext, useEffect, useRef, useState } from 'react';
-import { AutumnClientProvider } from '~/components/AutumnProvider';
+
 import { ErrorBoundaryWrapper } from '~/components/ErrorBoundary';
 import { ThemeProvider } from '~/components/theme-provider';
 import { ToastProvider } from '~/components/ui/toast';
 import { authClient } from '~/features/auth/auth-client';
 import { useAuth } from '~/features/auth/hooks/useAuth';
-import { USER_ROLES } from '~/features/auth/types';
 import { convexClient } from '~/lib/convexClient';
 import { setupClaimRefresh } from '~/lib/roleRefresh';
 import { setSentryUser } from '~/lib/sentry';
@@ -43,6 +42,7 @@ function AuthProvider({ children }: AuthProviderProps) {
     userId: user?.id,
     userEmail: user?.email,
     userName: user?.name,
+    userRole: user?.role,
     isPending,
     isAdmin,
   });
@@ -54,6 +54,7 @@ function AuthProvider({ children }: AuthProviderProps) {
       userId: user?.id,
       userEmail: user?.email,
       userName: user?.name,
+      userRole: user?.role,
       isPending,
       isAdmin,
     };
@@ -87,7 +88,7 @@ function AuthProvider({ children }: AuthProviderProps) {
             id: userId,
             email: user.email,
             name: user.name || undefined,
-            role: isAdmin ? USER_ROLES.ADMIN : USER_ROLES.USER,
+            role: user.role,
           },
         };
       } else {
@@ -104,7 +105,7 @@ function AuthProvider({ children }: AuthProviderProps) {
     if (!isPending) {
       setSentryUser(newAuthContext.authenticated ? newAuthContext.user : null);
     }
-  }, [isAuthenticated, user?.id, user?.email, user?.name, isPending, isAdmin]);
+  }, [isAuthenticated, user?.id, user?.email, user?.name, user?.role, isPending, isAdmin]);
 
   // Setup claim refresh when component mounts
   useEffect(() => {
@@ -126,18 +127,16 @@ export function Providers({ children }: { children: ReactNode }) {
       showDetails={false}
     >
       <ConvexBetterAuthProvider client={convexClient} authClient={authClient}>
-        <AutumnClientProvider>
-          <AuthProvider>
-            <ThemeProvider
-              attribute="class"
-              defaultTheme="system"
-              enableSystem
-              disableTransitionOnChange
-            >
-              <ToastProvider>{children}</ToastProvider>
-            </ThemeProvider>
-          </AuthProvider>
-        </AutumnClientProvider>
+        <AuthProvider>
+          <ThemeProvider
+            attribute="class"
+            defaultTheme="system"
+            enableSystem
+            disableTransitionOnChange
+          >
+            <ToastProvider>{children}</ToastProvider>
+          </ThemeProvider>
+        </AuthProvider>
       </ConvexBetterAuthProvider>
     </ErrorBoundaryWrapper>
   );

@@ -47,10 +47,14 @@ export function useAuth(options: AuthOptions = {}): AuthResult {
   // Determine role: use profile role if available, otherwise default to user
   // If we're not fetching roles, default to user
   const role: UserRole = shouldFetchProfile
-    ? profile?.role === USER_ROLES.ADMIN
-      ? USER_ROLES.ADMIN
-      : USER_ROLES.USER
+    ? ((profile?.role as UserRole) ?? DEFAULT_ROLE)
     : DEFAULT_ROLE;
+
+  const isAdmin = [
+    USER_ROLES.SUPER_ADMIN,
+    USER_ROLES.LINGAP_ADMIN,
+    USER_ROLES.PHARMACY_ADMIN,
+  ].includes(role);
 
   // Memoize return value to prevent unnecessary re-renders
   return useMemo(
@@ -63,7 +67,7 @@ export function useAuth(options: AuthOptions = {}): AuthResult {
           }
         : null,
       isAuthenticated: authState.isAuthenticated,
-      isAdmin: role === USER_ROLES.ADMIN,
+      isAdmin,
       isPending,
       error,
     }),
@@ -72,6 +76,7 @@ export function useAuth(options: AuthOptions = {}): AuthResult {
       role,
       profile?.phoneNumber,
       authState.isAuthenticated,
+      isAdmin,
       isPending,
       error,
       shouldFetchProfile,

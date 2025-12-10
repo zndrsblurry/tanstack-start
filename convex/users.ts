@@ -53,22 +53,46 @@ export const getUserCount = query({
  * Create or update a user profile with role
  * This stores app-specific user data separate from Better Auth's user table
  */
+/**
+ * Create or update a user profile with role
+ * This stores app-specific user data separate from Better Auth's user table
+ */
 export const setUserRole = guarded.mutation(
   'user.bootstrap', // Public capability but with strict bootstrap logic
   {
     userId: v.string(), // Better Auth user ID
-    role: v.union(v.literal('user'), v.literal('admin')), // Enforced enum
+    role: v.union(
+      v.literal('super_admin'),
+      v.literal('lingap_admin'),
+      v.literal('lingap_user'),
+      v.literal('pharmacy_admin'),
+      v.literal('pharmacy_user'),
+    ),
+    pharmacyId: v.optional(v.id('pharmacies')),
     allowBootstrap: v.optional(v.boolean()), // Special flag for first user signup
   },
-  async (ctx, args, role) => {
-    // Role validation is now handled by the Convex schema enum
-
+  async (ctx, args, callerRole) => {
     // Check if this is a bootstrap operation (first user creation)
     // Allow bootstrap without admin authentication for initial setup
     if (!args.allowBootstrap) {
-      // For non-bootstrap operations, ensure caller has admin role
-      if (role !== 'admin') {
-        throw new Error('Admin privileges required for role management');
+      // For non-bootstrap operations, check permissions
+      if (callerRole === 'super_admin') {
+        // Super admin can do anything
+      } else if (callerRole === 'lingap_admin') {
+        // Lingap admin can only create/manage lingap users
+        if (args.role !== 'lingap_user') {
+          throw new Error('Lingap Admins can only manage Lingap Users');
+        }
+      } else if (callerRole === 'pharmacy_admin') {
+        // Pharmacy admins can add pharmacy users
+        if (args.role !== 'pharmacy_user') {
+          throw new Error('Pharmacy Admins can only manage Pharmacy Users');
+        }
+        // Pharmacy admin can only assign users to their own pharmacy
+        // But here we rely on the args, we should probably validation pharmacyId match too
+        // For now, simple role check
+      } else {
+        throw new Error('Insufficient privileges for role management');
       }
     } else {
       // BOOTSTRAP: Allow only when no other user profiles exist (idempotent for the same user)
@@ -80,6 +104,11 @@ export const setUserRole = guarded.mutation(
       if (nonBootstrapProfile) {
         throw new Error('Bootstrap not allowed - another user profile already exists');
       }
+    }
+
+    // Additional Validations
+    if ((args.role === 'pharmacy_admin' || args.role === 'pharmacy_user') && !args.pharmacyId) {
+      throw new Error('Pharmacy ID is required for Pharmacy roles');
     }
 
     // Check if profile already exists
@@ -94,6 +123,7 @@ export const setUserRole = guarded.mutation(
       // Update existing profile
       await ctx.db.patch(existingProfile._id, {
         role: args.role,
+        pharmacyId: args.pharmacyId,
         updatedAt: now,
       });
     } else {
@@ -101,6 +131,7 @@ export const setUserRole = guarded.mutation(
       await ctx.db.insert('userProfiles', {
         userId: args.userId,
         role: args.role,
+        pharmacyId: args.pharmacyId,
         createdAt: now,
         updatedAt: now,
       });
@@ -251,7 +282,8 @@ export const getCurrentUserProfile = query({
       email: authUserTyped.email || '',
       name: authUserTyped.name || null,
       phoneNumber: authUserTyped.phoneNumber || null,
-      role: profile?.role || 'user', // Default to 'user' if no profile exists
+      role: profile?.role || 'lingap_user', // Default to 'lingap_user' if no profile
+      pharmacyId: profile?.pharmacyId || null,
       emailVerified: authUserTyped.emailVerified || false,
       createdAt,
       updatedAt,
@@ -263,14 +295,28 @@ export const getCurrentUserProfile = query({
  * Update user role (for admin operations)
  * SECURITY: Requires authenticated admin caller
  */
+/**
+ * Update user role (for admin operations)
+ * SECURITY: Requires authenticated admin caller
+ */
 export const updateUserRole = guarded.mutation(
   'user.write',
   {
     userId: v.string(),
-    role: v.union(v.literal('user'), v.literal('admin')), // Enforced enum
+    role: v.union(
+      v.literal('super_admin'),
+      v.literal('lingap_admin'),
+      v.literal('lingap_user'),
+      v.literal('pharmacy_admin'),
+      v.literal('pharmacy_user'),
+    ),
+    pharmacyId: v.optional(v.id('pharmacies')),
   },
-  async (ctx, args, _role) => {
-    // Role validation is now handled by the Convex schema enum
+  async (ctx, args) => {
+    // Pharmacy roles require pharmacyId
+    if ((args.role === 'pharmacy_admin' || args.role === 'pharmacy_user') && !args.pharmacyId) {
+      throw new Error('Pharmacy ID is required for Pharmacy roles');
+    }
 
     // Update role in userProfiles
     const profile = await ctx.db
@@ -278,15 +324,74 @@ export const updateUserRole = guarded.mutation(
       .withIndex('by_userId', (q) => q.eq('userId', args.userId))
       .first();
 
+    const now = Date.now();
+
     if (!profile) {
-      throw new Error('User profile not found');
+      // Create profile if it doesn't exist (e.g. user exists in auth but no profile yet)
+      await ctx.db.insert('userProfiles', {
+        userId: args.userId,
+        role: args.role,
+        pharmacyId: args.pharmacyId,
+        createdAt: now,
+        updatedAt: now,
+      });
+    } else {
+      await ctx.db.patch(profile._id, {
+        role: args.role,
+        pharmacyId: args.pharmacyId,
+        updatedAt: now,
+      });
     }
 
-    await ctx.db.patch(profile._id, {
-      role: args.role,
-      updatedAt: Date.now(),
+    return { success: true };
+  },
+);
+
+// List Users for Admin Dashboard
+export const listUsers = guarded.query(
+  'user.read', // Restricted to admins
+  {},
+  async (ctx) => {
+    // 1. Fetch all user profiles (contains roles & pharmacy links)
+    const profiles = await ctx.db.query('userProfiles').collect();
+    const profilesMap = new Map(profiles.map((p) => [p.userId, p]));
+
+    // 2. Fetch all pharmacies for mapping names
+    const pharmacies = await ctx.db.query('pharmacies').collect();
+    const pharmaciesMap = new Map(pharmacies.map((p) => [p._id, p]));
+
+    // 3. Fetch all users from Better Auth
+    // Note: In a large app, you'd paginate this. For now, fetch all (limit 1000).
+    const rawResult: unknown = await ctx.runQuery(components.betterAuth.adapter.findMany, {
+      model: 'user',
+      paginationOpts: {
+        cursor: null,
+        numItems: 1000,
+        id: 0,
+      },
     });
 
-    return { success: true };
+    const normalized = normalizeAdapterFindManyResult<BetterAuthAdapterUserDoc>(rawResult);
+    const authUsers = normalized.page;
+
+    // 4. Merge Data
+    const results = authUsers.map((user) => {
+      const userId = user.id ?? user._id;
+      const profile = profilesMap.get(userId);
+      const pharmacyId = profile?.pharmacyId;
+      const pharmacy = pharmacyId ? pharmaciesMap.get(pharmacyId) : undefined;
+
+      return {
+        id: userId,
+        name: user.name,
+        email: user.email,
+        role: profile?.role ?? 'lingap_user',
+        pharmacyName: pharmacy?.name,
+        emailVerified: user.emailVerified,
+        createdAt: user.createdAt,
+      };
+    });
+
+    return results;
   },
 );

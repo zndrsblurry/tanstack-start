@@ -2,8 +2,8 @@ import { api } from '@convex/_generated/api';
 import type { Id } from '@convex/_generated/dataModel';
 import { useForm } from '@tanstack/react-form';
 import { useQuery } from 'convex/react';
-import { Building2, Mail, ShieldCheck, User as UserIcon } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { Building2, Lock, Mail, ShieldCheck, User as UserIcon } from 'lucide-react';
+import { useState } from 'react';
 import { Button } from '~/components/ui/button';
 import {
   Dialog,
@@ -26,12 +26,10 @@ import { useToast } from '~/components/ui/toast';
 import { useAuth } from '../../auth/hooks/useAuth';
 import type { UserRole } from '../../auth/types';
 import { DEFAULT_ROLE, USER_ROLES } from '../../auth/types';
-import { useOptimisticMutation } from '../hooks/useOptimisticUpdates';
-import type { User } from '../types';
+import { signUpWithFirstAdminServerFn } from '../../auth/server/user-management';
 
-interface UserEditDialogProps {
+interface UserCreateDialogProps {
   open: boolean;
-  user: User | null;
   onClose: () => void;
 }
 
@@ -40,90 +38,67 @@ function requiresPharmacy(role: UserRole): boolean {
   return role === USER_ROLES.PHARMACY_ADMIN || role === USER_ROLES.PHARMACY_USER;
 }
 
-export function UserEditDialog({ open, user, onClose }: UserEditDialogProps) {
+export function UserCreateDialog({ open, onClose }: UserCreateDialogProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [currentRole, setCurrentRole] = useState<UserRole>(
-    (user?.role as UserRole) || DEFAULT_ROLE,
-  );
+  const [currentRole, setCurrentRole] = useState<UserRole>(DEFAULT_ROLE);
   const { showToast } = useToast();
   const { user: currentUser } = useAuth();
   const currentUserRole = currentUser?.role;
 
-  // Optimistic mutations with automatic rollback on error
-  const updateBetterAuthUserOptimistic = useOptimisticMutation(api.admin.updateBetterAuthUser);
-  const updateUserRoleOptimistic = useOptimisticMutation(api.users.updateUserRole);
+  // Filter roles based on current user's role
+  const canAssignSuperAdmin = currentUserRole === USER_ROLES.SUPER_ADMIN;
+  const canAssignLingapAdmin = currentUserRole === USER_ROLES.SUPER_ADMIN;
+  const canAssignLingapUser =
+    currentUserRole === USER_ROLES.SUPER_ADMIN || currentUserRole === USER_ROLES.LINGAP_ADMIN;
+  const canAssignPharmacyAdmin = currentUserRole === USER_ROLES.SUPER_ADMIN;
+  const canAssignPharmacyUser =
+    currentUserRole === USER_ROLES.SUPER_ADMIN || currentUserRole === USER_ROLES.PHARMACY_ADMIN;
 
   // Fetch pharmacies for dropdown
   const pharmacies = useQuery(api.pharmacies.list, {});
 
   const form = useForm({
     defaultValues: {
-      name: user?.name || '',
-      email: user?.email || '',
-      role: (user?.role as UserRole) || DEFAULT_ROLE,
-      pharmacyId: (user?.pharmacyId as Id<'pharmacies'> | undefined) || undefined,
+      name: '',
+      email: '',
+      password: '',
+      role: DEFAULT_ROLE as UserRole,
+      pharmacyId: undefined as Id<'pharmacies'> | undefined,
     },
     onSubmit: async ({ value }) => {
-      if (!user?.id) return;
-
       setIsSubmitting(true);
       setSubmitError(null);
 
       try {
         const trimmedName = value.name.trim();
         const trimmedEmail = value.email.trim().toLowerCase();
+        const trimmedPassword = value.password.trim();
 
         // Validate pharmacy selection for pharmacy roles
         if (requiresPharmacy(value.role) && !value.pharmacyId) {
           throw new Error('Pharmacy selection is required for pharmacy roles');
         }
 
-        // Execute updates in parallel with optimistic updates
-        const updatePromises: Promise<{ success: boolean }>[] = [];
+        // Create user via server function
+        const result = await signUpWithFirstAdminServerFn({
+          data: {
+            name: trimmedName,
+            email: trimmedEmail,
+            password: trimmedPassword,
+            role: value.role,
+            pharmacyId: requiresPharmacy(value.role) ? value.pharmacyId : undefined,
+          },
+        });
 
-        // Optimistic update for name
-        if (trimmedName !== user.name) {
-          updatePromises.push(
-            updateBetterAuthUserOptimistic({
-              userId: user.id,
-              name: trimmedName,
-            }),
-          );
-        }
+        showToast(`User "${trimmedName}" has been created successfully.`, 'success');
 
-        // Optimistic update for email
-        if (trimmedEmail !== user.email.toLowerCase()) {
-          updatePromises.push(
-            updateBetterAuthUserOptimistic({
-              userId: user.id,
-              email: trimmedEmail,
-            }),
-          );
-        }
-
-        // Optimistic update for role and pharmacy
-        if (value.role !== user.role || value.pharmacyId !== user.pharmacyId) {
-          updatePromises.push(
-            updateUserRoleOptimistic({
-              userId: user.id,
-              role: value.role,
-              pharmacyId: requiresPharmacy(value.role) ? value.pharmacyId : undefined,
-            }),
-          );
-        }
-
-        // Execute all necessary updates in parallel
-        if (updatePromises.length > 0) {
-          await Promise.all(updatePromises);
-        }
-
-        showToast(`User "${trimmedName}" has been updated successfully.`, 'success');
-
+        // Reset form and close dialog
+        form.reset();
         onClose();
       } catch (error) {
-        console.error('Failed to update user:', error);
-        const errorMessage = error instanceof Error ? error.message : 'Failed to update user';
+        console.error('Failed to create user:', error);
+        const errorMessage = error instanceof Error ? error.message : 'Failed to create user';
         setSubmitError(errorMessage);
         showToast(errorMessage, 'error');
       } finally {
@@ -132,20 +107,6 @@ export function UserEditDialog({ open, user, onClose }: UserEditDialogProps) {
     },
   });
 
-  // Update form values when user changes
-  useEffect(() => {
-    if (user) {
-      const userRole = (user.role as UserRole) || DEFAULT_ROLE;
-      form.reset({
-        name: user.name || '',
-        email: user.email || '',
-        role: userRole,
-        pharmacyId: (user.pharmacyId as Id<'pharmacies'> | undefined) || undefined,
-      });
-      setCurrentRole(userRole);
-    }
-  }, [user, form]);
-
   // Show/hide pharmacy field based on current role
   const showPharmacyField = requiresPharmacy(currentRole);
 
@@ -153,9 +114,9 @@ export function UserEditDialog({ open, user, onClose }: UserEditDialogProps) {
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
-          <DialogTitle>Edit User</DialogTitle>
+          <DialogTitle>Create User</DialogTitle>
           <DialogDescription>
-            Make changes to the user's profile and role. Click save when you're done.
+            Create a new user account. Fill in the details below and assign a role.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -230,6 +191,37 @@ export function UserEditDialog({ open, user, onClose }: UserEditDialogProps) {
               )}
             </form.Field>
             <form.Field
+              name="password"
+              validators={{
+                onChange: ({ value }) => {
+                  if (!value.trim()) return 'Password is required';
+                  if (value.length < 8) return 'Password must be at least 8 characters long';
+                  return undefined;
+                },
+              }}
+            >
+              {(field) => (
+                <Field>
+                  <FieldLabel>Password</FieldLabel>
+                  <InputGroup>
+                    <InputGroupIcon>
+                      <Lock />
+                    </InputGroupIcon>
+                    <InputGroupInput
+                      type="password"
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      onBlur={field.handleBlur}
+                      placeholder="Enter password"
+                    />
+                  </InputGroup>
+                  {field.state.meta.errors.length > 0 && (
+                    <p className="text-sm text-destructive">{field.state.meta.errors[0]}</p>
+                  )}
+                </Field>
+              )}
+            </form.Field>
+            <form.Field
               name="role"
               validators={{
                 onChange: ({ value }) => {
@@ -255,7 +247,7 @@ export function UserEditDialog({ open, user, onClose }: UserEditDialogProps) {
                       <SelectValue placeholder="Select role" />
                     </SelectTrigger>
                     <SelectContent>
-                      {currentUserRole === USER_ROLES.SUPER_ADMIN && (
+                      {canAssignSuperAdmin && (
                         <SelectItem value={USER_ROLES.SUPER_ADMIN}>
                           <div className="flex items-center gap-2">
                             <ShieldCheck className="w-4 h-4" />
@@ -263,7 +255,7 @@ export function UserEditDialog({ open, user, onClose }: UserEditDialogProps) {
                           </div>
                         </SelectItem>
                       )}
-                      {currentUserRole === USER_ROLES.SUPER_ADMIN && (
+                      {canAssignLingapAdmin && (
                         <SelectItem value={USER_ROLES.LINGAP_ADMIN}>
                           <div className="flex items-center gap-2">
                             <ShieldCheck className="w-4 h-4" />
@@ -271,11 +263,10 @@ export function UserEditDialog({ open, user, onClose }: UserEditDialogProps) {
                           </div>
                         </SelectItem>
                       )}
-                      {(currentUserRole === USER_ROLES.SUPER_ADMIN ||
-                        currentUserRole === USER_ROLES.LINGAP_ADMIN) && (
+                      {canAssignLingapUser && (
                         <SelectItem value={USER_ROLES.LINGAP_USER}>Lingap User</SelectItem>
                       )}
-                      {currentUserRole === USER_ROLES.SUPER_ADMIN && (
+                      {canAssignPharmacyAdmin && (
                         <SelectItem value={USER_ROLES.PHARMACY_ADMIN}>
                           <div className="flex items-center gap-2">
                             <Building2 className="w-4 h-4" />
@@ -283,8 +274,7 @@ export function UserEditDialog({ open, user, onClose }: UserEditDialogProps) {
                           </div>
                         </SelectItem>
                       )}
-                      {(currentUserRole === USER_ROLES.SUPER_ADMIN ||
-                        currentUserRole === USER_ROLES.PHARMACY_ADMIN) && (
+                      {canAssignPharmacyUser && (
                         <SelectItem value={USER_ROLES.PHARMACY_USER}>
                           <div className="flex items-center gap-2">
                             <Building2 className="w-4 h-4" />
@@ -349,7 +339,7 @@ export function UserEditDialog({ open, user, onClose }: UserEditDialogProps) {
             <form.Subscribe selector={(state) => [state.canSubmit, state.isSubmitting]}>
               {([canSubmit, _isSubmitting]) => (
                 <Button type="submit" disabled={!canSubmit || isSubmitting}>
-                  {isSubmitting ? 'Saving...' : 'Save changes'}
+                  {isSubmitting ? 'Creating...' : 'Create User'}
                 </Button>
               )}
             </form.Subscribe>

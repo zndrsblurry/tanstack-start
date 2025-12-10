@@ -13,6 +13,7 @@ export interface User {
   email: string;
   name: string | null;
   role: UserRole;
+  pharmacyId: string | null;
   emailVerified: boolean;
   createdAt: number; // Unix timestamp from Convex
   updatedAt: number; // Unix timestamp from Convex

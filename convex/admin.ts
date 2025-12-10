@@ -5,14 +5,16 @@ import {
 } from '../src/lib/server/better-auth/adapter-utils';
 import { assertUserId } from '../src/lib/shared/user-id';
 import { components, internal } from './_generated/api';
-import type { GenericCtx } from './_generated/server';
+import type { QueryCtx, MutationCtx, ActionCtx } from './_generated/server';
 import { authComponent } from './auth';
 import { guarded } from './authz/guardFactory';
 
 type BetterAuthUser = BetterAuthAdapterUserDoc;
 
 // Helper function to fetch all Better Auth users with proper pagination
-async function fetchAllBetterAuthUsers(ctx: GenericCtx): Promise<BetterAuthUser[]> {
+async function fetchAllBetterAuthUsers(
+  ctx: QueryCtx | MutationCtx | ActionCtx,
+): Promise<BetterAuthUser[]> {
   const allUsers: BetterAuthUser[] = [];
   let cursor: string | null = null;
 
@@ -53,7 +55,7 @@ async function fetchAllBetterAuthUsers(ctx: GenericCtx): Promise<BetterAuthUser[
 
 // OPTIMIZATION: Helper function to fetch only relevant Better Auth users by IDs
 async function fetchBetterAuthUsersByIds(
-  ctx: GenericCtx,
+  ctx: QueryCtx | MutationCtx | ActionCtx,
   userIds: string[],
 ): Promise<BetterAuthUser[]> {
   if (userIds.length === 0) return [];
@@ -128,7 +130,14 @@ export const getAllUsers = guarded.query(
     ),
     secondarySortOrder: v.union(v.literal('asc'), v.literal('desc')),
     search: v.optional(v.string()),
-    role: v.union(v.literal('all'), v.literal('user'), v.literal('admin')),
+    role: v.union(
+      v.literal('all'),
+      v.literal('super_admin'),
+      v.literal('lingap_admin'),
+      v.literal('lingap_user'),
+      v.literal('pharmacy_admin'),
+      v.literal('pharmacy_user'),
+    ),
     cursor: v.optional(v.string()), // Add cursor for efficient pagination
   },
   async (ctx, args, _role) => {
@@ -140,7 +149,9 @@ export const getAllUsers = guarded.query(
       args.role !== 'all'
         ? await ctx.db
             .query('userProfiles')
-            .withIndex('by_role_createdAt', (q) => q.eq('role', args.role))
+            .withIndex('by_role_createdAt', (q) =>
+              q.eq('role', args.role as Exclude<typeof args.role, 'all'>),
+            )
             .paginate({
               cursor: args.cursor ?? null,
               numItems: args.pageSize,
@@ -171,7 +182,8 @@ export const getAllUsers = guarded.query(
           id: profile.userId,
           email: authUser.email,
           name: authUser.name || null,
-          role: profile.role as 'user' | 'admin',
+          role: profile.role,
+          pharmacyId: profile.pharmacyId || null,
           emailVerified: authUser.emailVerified || false,
           createdAt: profile.createdAt,
           updatedAt: profile.updatedAt,
@@ -252,7 +264,9 @@ export const getAllUsers = guarded.query(
       args.role !== 'all'
         ? await ctx.db
             .query('userProfiles')
-            .withIndex('by_role_createdAt', (q) => q.eq('role', args.role))
+            .withIndex('by_role_createdAt', (q) =>
+              q.eq('role', args.role as Exclude<typeof args.role, 'all'>),
+            )
             .collect()
             .then((profiles) => profiles.length)
         : await ctx.db
@@ -466,12 +480,14 @@ export const deleteUser = guarded.mutation(
       .withIndex('by_userId', (q) => q.eq('userId', args.userId))
       .first();
 
-    // Prevent deletion of the only admin user
-    if (targetProfile?.role === 'admin') {
+    // Prevent deletion of the only super_admin user
+    if (targetProfile?.role === 'super_admin') {
       const allProfiles = await ctx.db.query('userProfiles').collect();
-      const adminCount = allProfiles.filter((p) => p.role === 'admin').length;
+      const adminCount = allProfiles.filter((p) => p.role === 'super_admin').length;
       if (adminCount <= 1) {
-        throw new Error('Cannot delete the only admin user. At least one admin must remain.');
+        throw new Error(
+          'Cannot delete the only super_admin user. At least one super_admin must remain.',
+        );
       }
     }
 

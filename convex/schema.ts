@@ -10,17 +10,54 @@ export default defineSchema({
   // User profiles table - stores app-specific user data that references Better Auth user IDs
   userProfiles: defineTable({
     userId: v.string(), // References Better Auth user.id
-    role: v.union(v.literal('user'), v.literal('admin')), // Enforced enum for data integrity
-    // Add other app-specific user fields here as needed
+    role: v.union(
+      v.literal('super_admin'),
+      v.literal('lingap_admin'),
+      v.literal('lingap_user'),
+      v.literal('pharmacy_admin'),
+      v.literal('pharmacy_user'),
+    ),
+    pharmacyId: v.optional(v.id('pharmacies')),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index('by_userId', ['userId'])
-    .index('by_role_createdAt', ['role', 'createdAt']),
+    .index('by_role_createdAt', ['role', 'createdAt'])
+    .index('by_pharmacyId', ['pharmacyId']),
 
+  pharmacies: defineTable({
+    name: v.string(),
+    slug: v.string(), // unique identifier for URLs/Lookups
+    location: v.string(),
+    contactInfo: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index('by_slug', ['slug']),
+
+  medicines: defineTable({
+    pharmacyId: v.id('pharmacies'),
+    name: v.string(), // Generic name
+    brand: v.string(), // Brand name
+    description: v.optional(v.string()),
+    dosage: v.string(),
+    category: v.string(),
+    price: v.number(),
+    stock: v.number(),
+    expiryDate: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index('by_pharmacyId', ['pharmacyId'])
+    .index('by_pharmacyId_name', ['pharmacyId', 'name'])
+    .searchIndex('search_name', {
+      searchField: 'name',
+      filterFields: ['pharmacyId'],
+    }),
+
+  // Keep existing auditLogs if needed, or remove if unused. Leaving for safety.
   auditLogs: defineTable({
     id: v.string(),
-    userId: v.string(), // References Better Auth user.id
+    userId: v.string(),
     action: v.string(),
     entityType: v.string(),
     entityId: v.optional(v.string()),
@@ -48,48 +85,4 @@ export default defineSchema({
   })
     .index('by_identifier_kind', ['identifier', 'kind'])
     .index('by_createdAt', ['createdAt']),
-
-  aiMessageUsage: defineTable({
-    userId: v.string(),
-    messagesUsed: v.number(),
-    pendingMessages: v.number(),
-    createdAt: v.number(),
-    updatedAt: v.number(),
-    lastReservedAt: v.optional(v.number()),
-    lastCompletedAt: v.optional(v.number()),
-  }).index('by_userId', ['userId']),
-
-  aiResponses: defineTable({
-    userId: v.string(),
-    requestKey: v.string(),
-    method: v.union(v.literal('direct'), v.literal('gateway'), v.literal('structured')),
-    provider: v.optional(v.string()),
-    model: v.optional(v.string()),
-    response: v.string(),
-    rawText: v.optional(v.string()),
-    structuredData: v.optional(
-      v.object({
-        title: v.string(),
-        summary: v.string(),
-        keyPoints: v.array(v.string()),
-        category: v.string(),
-        difficulty: v.string(),
-      }),
-    ),
-    parseError: v.optional(v.string()),
-    usage: v.optional(
-      v.object({
-        totalTokens: v.optional(v.number()),
-        inputTokens: v.optional(v.number()),
-        outputTokens: v.optional(v.number()),
-      }),
-    ),
-    finishReason: v.optional(v.string()),
-    status: v.union(v.literal('pending'), v.literal('complete'), v.literal('error')),
-    errorMessage: v.optional(v.string()),
-    createdAt: v.number(),
-    updatedAt: v.number(),
-  })
-    .index('by_userId_createdAt', ['userId', 'createdAt'])
-    .index('by_requestKey', ['requestKey']),
 });

@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import { AppNavigation } from '~/components/AppNavigation';
 import { ClientOnly } from '~/components/ClientOnly';
 import { useAuthContext } from '~/components/Providers';
+import { SidebarLayout } from '~/components/SidebarLayout';
 
 /**
  * Application shell component following TanStack Start best practices
@@ -53,12 +54,22 @@ export function AppShell() {
   return (
     <>
       <div className="min-h-screen bg-background">
-        {!isAuthRoute && <AppNavigation />}
-        <main
-          className={`max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8 ${isAuthRoute ? 'pt-12' : ''}`}
-        >
-          <Outlet />
-        </main>
+        {isAuthRoute ? (
+          <main className="pt-12 max-w-7xl mx-auto px-4">
+            <Outlet />
+          </main>
+        ) : location.pathname.startsWith('/app') ? (
+          <SidebarLayout>
+            <Outlet />
+          </SidebarLayout>
+        ) : (
+          <>
+            <AppNavigation />
+            <main className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+              <Outlet />
+            </main>
+          </>
+        )}
       </div>
       {import.meta.env.DEV && (
         <ClientOnly>
